@@ -178,6 +178,11 @@
             transition: width 0.3s;
         }
 
+        .upload-status {
+            margin-top: 10px;
+            color: #BB86FC;
+        }
+
         .search-bar {
             margin-bottom: 20px;
         }
@@ -225,6 +230,16 @@
         .change-name-container {
             margin-top: 15px;
         }
+
+        .profile-picture-container {
+            margin-top: 20px;
+        }
+
+        .profile-picture {
+            max-width: 150px;
+            border-radius: 50%;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -243,12 +258,18 @@
             <button id="loadMedia" class="btn btn-primary mt-3">Load Media</button>
             <div class="mt-4">
                 <button id="signInButton" class="btn btn-primary mb-3">Sign In with Google</button>
-                <input type="file" id="fileInput" class="form-control mb-3" disabled>
+                <input type="file" id="fileInput" class="form-control mb-3" multiple disabled>
                 <button id="uploadButton" class="btn btn-primary" disabled>Upload Media</button>
                 <div class="progress-bar" id="uploadProgress">
                     <div class="progress-bar-fill" id="uploadProgressFill"></div>
                 </div>
+                <div class="upload-status" id="uploadStatus"></div>
                 <button id="darkModeToggle" class="dark-mode-toggle">Toggle Dark Mode</button>
+            </div>
+            <div class="profile-picture-container">
+                <h4>Select Profile Picture</h4>
+                <input type="file" id="profilePictureInput" class="form-control mb-3" accept="image/*">
+                <div id="profilePictureOutput"></div>
             </div>
             <div class="favorites">
                 <h4>Favorites</h4>
@@ -307,13 +328,9 @@
                 if (user.email === 'pranksteratrap@gmail.com') {
                     document.getElementById('fileInput').disabled = false;
                     document.getElementById('uploadButton').disabled = false;
-                    alert('Signed in as pranksteratrap@gmail.com. You can now upload media.');
-                } else {
-                    alert('You are not authorized to upload media.');
                 }
             }).catch(function(error) {
                 console.error('Error signing in:', error);
-                alert('Error signing in. Please try again.');
             });
         });
 
@@ -412,6 +429,7 @@
             var mediaItem = mediaItems[currentIndex];
             if (!favorites.some(fav => fav.name === mediaItem.name)) {
                 favorites.push(mediaItem);
+                saveFavorites();
                 updateFavorites();
             }
         });
@@ -428,83 +446,88 @@
             });
         }
 
+        function saveFavorites() {
+            var user = auth.currentUser;
+            if (user) {
+                var favoritesRef = database.ref('users/' + user.uid + '/favorites');
+                favoritesRef.set(favorites);
+            }
+        }
+
         // Upload media functionality
         document.getElementById('uploadButton').addEventListener('click', function() {
             var fileInput = document.getElementById('fileInput');
-            var file = fileInput.files[0];
-            if (!file) {
-                alert('Please select a file to upload.');
+            var files = fileInput.files;
+            if (files.length === 0) {
                 return;
             }
 
-            var fileType = file.type.split('/')[0];
-            var storageRef;
+            let completedUploads = 0;
+            let totalUploads = files.length;
+            document.getElementById('uploadStatus').textContent = `Uploading 0 of ${totalUploads} files...`;
 
-            if (fileType === 'image') {
-                storageRef = firebase.storage().ref('images/' + file.name);
-            } else if (fileType === 'video') {
-                storageRef = firebase.storage().ref('videos/' + file.name);
-            } else {
-                alert('Unsupported file type. Please upload an image or a video.');
-                return;
-            }
+            Array.from(files).forEach(function(file) {
+                var fileType = file.type.split('/')[0];
+                var storageRef;
 
-            var uploadTask = storageRef.put(file);
-
-            uploadTask.on('state_changed', 
-                function(snapshot) {
-                    var progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    document.getElementById('uploadProgressFill').style.width = progress + '%';
-                }, 
-                function(error) {
-                    console.error('Error uploading file:', error);
-                    alert('Error uploading file. Please try again.');
-                }, 
-                function() {
-                    alert('File uploaded successfully!');
-                    document.getElementById('loadMedia').click();
+                if (fileType === 'image') {
+                    storageRef = firebase.storage().ref('images/' + file.name);
+                } else if (fileType === 'video') {
+                    storageRef = firebase.storage().ref('videos/' + file.name);
+                } else {
+                    console.error('Unsupported file type:', file.name);
+                    return;
                 }
-            );
+
+                var uploadTask = storageRef.put(file);
+
+                uploadTask.on('state_changed', 
+                    function(snapshot) {
+                        var progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                        document.getElementById('uploadProgressFill').style.width = progress + '%';
+                    }, 
+                    function(error) {
+                        console.error('Error uploading file:', error);
+                    }, 
+                    function() {
+                        completedUploads++;
+                        document.getElementById('uploadStatus').textContent = `Uploading ${completedUploads} of ${totalUploads} files...`;
+                        if (completedUploads === totalUploads) {
+                            document.getElementById('uploadStatus').textContent = 'Upload complete!';
+                            document.getElementById('loadMedia').click();
+                        }
+                    }
+                );
+            });
         });
 
-        // Delete media functionality
-        document.getElementById('deleteMedia').addEventListener('click', function() {
-            var mediaItem = mediaItems[currentIndex];
-            if (confirm(`Are you sure you want to delete ${mediaItem.name}?`)) {
-                mediaItem.ref.delete().then(function() {
-                    alert('Media deleted successfully.');
-                    document.getElementById('closePopup').click();
-                    document.getElementById('loadMedia').click();
-                }).catch(function(error) {
-                    console.error('Error deleting media:', error);
-                    alert('Error deleting media. Please try again.');
-                });
-            }
-        });
-
-        // Change media name functionality
-        document.getElementById('changeNameButton').addEventListener('click', function() {
-            var newName = document.getElementById('newNameInput').value.trim();
-            if (newName === '') {
-                alert('Please enter a new name.');
+        // Change profile picture
+        document.getElementById('profilePictureInput').addEventListener('change', function() {
+            var file = this.files[0];
+            if (!file) {
                 return;
             }
 
-            var mediaItem = mediaItems[currentIndex];
-            var newRef = mediaItem.ref.parent.child(newName);
+            var user = auth.currentUser;
+            if (user) {
+                var profilePicRef = firebase.storage().ref('profile_pictures/' + user.uid + '/' + file.name);
+                var uploadTask = profilePicRef.put(file);
 
-            mediaItem.ref.getDownloadURL().then(function(url) {
-                return newRef.putString(url, 'data_url');
-            }).then(function() {
-                return mediaItem.ref.delete();
-            }).then(function() {
-                alert('Media name changed successfully.');
-                document.getElementById('closePopup').click();
-                document.getElementById('loadMedia').click();
-            }).catch(function(error) {
-                console.error('Error changing media name:', error);
-                alert('Error changing media name. Please try again.');
-            });
+                uploadTask.on('state_changed', 
+                    function(snapshot) {
+                        var progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                        document.getElementById('uploadProgressFill').style.width = progress + '%';
+                    }, 
+                    function(error) {
+                        console.error('Error uploading profile picture:', error);
+                    }, 
+                    function() {
+                        profilePicRef.getDownloadURL().then(function(url) {
+                            document.getElementById('profilePictureOutput').innerHTML = `<img src="${url}" alt="Profile Picture" class="profile-picture">`;
+                        });
+                    }
+                );
+            }
         });
 
         // Dark mode toggle
@@ -523,7 +546,6 @@
             var feedbackInput = document.getElementById('feedbackInput');
             var feedback = feedbackInput.value.trim();
             if (feedback === '') {
-                alert('Please enter your feedback before submitting.');
                 return;
             }
 
@@ -532,12 +554,10 @@
                 feedback: feedback,
                 timestamp: new Date().toISOString()
             }).then(function() {
-                alert('Feedback submitted successfully!');
                 feedbackInput.value = '';
                 loadFeedbackMessages();
             }).catch(function(error) {
                 console.error('Error submitting feedback:', error);
-                alert('Error submitting feedback. Please try again.');
             });
         });
 
